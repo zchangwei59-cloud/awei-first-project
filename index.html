@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5eff">
+  <title>事故车维修进度记录</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <div class="brand-mark" aria-hidden="true">修</div>
+      <div>
+        <h1>事故车维修进度</h1>
+        <p>信息清楚，进度随时掌握</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" aria-label="维修概览">
+      <div><strong id="totalCount">0</strong><span>全部车辆</span></div>
+      <div><strong id="repairingCount">0</strong><span>维修中</span></div>
+      <div><strong id="doneCount">0</strong><span>已完成</span></div>
+    </section>
+
+    <section class="panel form-panel">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">新增记录</span>
+          <h2 id="formTitle">登记维修车辆</h2>
+        </div>
+        <button id="cancelEdit" class="text-button" type="button" hidden>取消编辑</button>
+      </div>
+
+      <form id="repairForm">
+        <input type="hidden" id="recordId">
+        <div class="form-grid">
+          <label>车牌号 <em>*</em>
+            <input id="plateNumber" required maxlength="12" placeholder="例如：粤A·12345" autocomplete="off">
+          </label>
+          <label>车型 <em>*</em>
+            <input id="carModel" required maxlength="30" placeholder="例如：丰田凯美瑞">
+          </label>
+          <label>工单号 <em>*</em>
+            <input id="orderNumber" required maxlength="30" placeholder="例如：WX20260829001">
+          </label>
+          <label>当前维修状态 <em>*</em>
+            <select id="status" required>
+              <option value="待定损">待定损</option>
+              <option value="待维修">待维修</option>
+              <option value="维修中" selected>维修中</option>
+              <option value="待配件">待配件</option>
+              <option value="待交车">待交车</option>
+              <option value="已完成">已完成</option>
+            </select>
+          </label>
+          <label class="full">维修项目
+            <textarea id="repairItems" rows="3" maxlength="500" placeholder="填写钣金、喷漆、机修等项目"></textarea>
+          </label>
+          <label class="full">配件更换情况
+            <textarea id="partsReplacement" rows="3" maxlength="500" placeholder="填写已更换、待到货的配件"></textarea>
+          </label>
+          <label>大灯外修
+            <select id="headlightRepair">
+              <option value="无">无</option><option value="待送修">待送修</option>
+              <option value="外修中">外修中</option><option value="已完成">已完成</option>
+            </select>
+          </label>
+          <label>铝合金外修
+            <select id="alloyRepair">
+              <option value="无">无</option><option value="待送修">待送修</option>
+              <option value="外修中">外修中</option><option value="已完成">已完成</option>
+            </select>
+          </label>
+          <label class="full">备注
+            <textarea id="notes" rows="3" maxlength="500" placeholder="填写预计完工时间、客户要求等补充信息"></textarea>
+          </label>
+        </div>
+        <p class="storage-tip">数据仅保存在当前浏览器中，请勿清除浏览器网站数据。</p>
+        <button class="primary-button" type="submit"><span aria-hidden="true">＋</span><span id="submitText">保存维修记录</span></button>
+      </form>
+    </section>
+
+    <section class="records-section">
+      <div class="section-heading records-heading">
+        <div><span class="eyebrow">维修台账</span><h2>车辆记录</h2></div>
+        <span id="recordCount" class="count-pill">0 条</span>
+      </div>
+      <label class="search-box">
+        <span aria-hidden="true">⌕</span>
+        <input id="searchInput" type="search" placeholder="搜索车牌、车型或工单号" aria-label="搜索维修记录">
+      </label>
+      <div id="recordsList" class="records-list" aria-live="polite"></div>
+      <div id="emptyState" class="empty-state">
+        <div aria-hidden="true">🚙</div>
+        <h3>暂无维修记录</h3>
+        <p>填写上方信息，建立第一条车辆维修记录</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
