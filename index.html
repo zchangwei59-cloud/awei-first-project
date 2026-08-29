@@ -36,6 +36,18 @@
 
       <form id="repairForm">
         <input type="hidden" id="recordId">
+        <section class="scan-entry" aria-labelledby="scanTitle">
+          <div class="scan-entry__copy">
+            <span class="scan-icon" aria-hidden="true">▣</span>
+            <div><strong id="scanTitle">拍照识别工单</strong><small>图片仅在本机识别，不会上传</small></div>
+          </div>
+          <div class="scan-actions">
+            <button class="scan-button" id="cameraButton" type="button">拍摄工单</button>
+            <button class="scan-button secondary" id="albumButton" type="button">相册选图</button>
+          </div>
+          <input id="cameraInput" class="visually-hidden" type="file" accept="image/*" capture="environment">
+          <input id="albumInput" class="visually-hidden" type="file" accept="image/*">
+        </section>
         <div class="form-grid">
           <label>车牌号 <em>*</em>
             <input id="plateNumber" required maxlength="12" placeholder="例如：粤A·12345" autocomplete="off">
@@ -101,7 +113,33 @@
     </section>
   </main>
 
+  <div id="ocrDialog" class="dialog" role="dialog" aria-modal="true" aria-labelledby="ocrTitle" hidden>
+    <div class="dialog__backdrop" data-close-dialog></div>
+    <section class="dialog__panel">
+      <div class="dialog__header"><div><span class="eyebrow">本地 OCR</span><h2 id="ocrTitle">调整工单照片</h2></div><button class="close-button" type="button" data-close-dialog aria-label="关闭">×</button></div>
+      <div id="imageEditor">
+        <p class="editor-tip">拖动蓝色选框选择工单区域；也可先旋转照片。</p>
+        <div class="canvas-wrap"><canvas id="ocrCanvas"></canvas><div id="cropBox" class="crop-box" aria-label="裁剪区域"><i></i></div></div>
+        <div class="editor-actions">
+          <button id="rotateLeft" type="button">↶ 左转</button><button id="rotateRight" type="button">↷ 右转</button>
+          <button id="startOcr" class="primary-button compact" type="button">裁剪并开始识别</button>
+        </div>
+      </div>
+      <div id="ocrProgress" class="ocr-progress" hidden>
+        <div class="loader" aria-hidden="true"></div><strong id="progressLabel">正在准备中文识别…</strong>
+        <div class="progress-track"><span id="progressBar"></span></div><small>首次使用需加载中文识别数据，请保持网络连接；图片始终仅在本机处理。</small>
+      </div>
+      <div id="ocrResult" hidden>
+        <p class="result-tip">请核对识别结果，确认后将自动填写到登记表。已有内容不会被空白结果覆盖。</p>
+        <div id="recognizedFields" class="recognized-fields"></div>
+        <details><summary>查看识别原文</summary><pre id="rawOcrText"></pre></details>
+        <div class="result-actions"><button id="retryOcr" type="button">重新选取</button><button id="applyOcr" class="primary-button compact" type="button">确认并填写</button></div>
+      </div>
+    </section>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
