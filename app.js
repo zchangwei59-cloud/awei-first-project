@@ -5,6 +5,9 @@
   const $ = (id) => document.getElementById(id);
   const form = $('repairForm');
   let records = loadRecords();
+  let sourceImage = null;
+  let rotation = 0;
+  let ocrValues = {};
 
   function loadRecords() {
     try {
@@ -109,5 +112,117 @@
 
   $('cancelEdit').addEventListener('click', resetForm);
   $('searchInput').addEventListener('input', render);
+
+  const ocrFieldLabels = { plateNumber:'车牌号', carModel:'车型', orderNumber:'工单号', repairItems:'维修项目', partsReplacement:'配件更换', notes:'备注' };
+  const dialog = $('ocrDialog');
+  const canvas = $('ocrCanvas');
+  const cropBox = $('cropBox');
+
+  function setOcrView(view) {
+    $('imageEditor').hidden = view !== 'editor';
+    $('ocrProgress').hidden = view !== 'progress';
+    $('ocrResult').hidden = view !== 'result';
+  }
+
+  function openPicker(id) { $(id).click(); }
+  $('cameraButton').addEventListener('click', () => openPicker('cameraInput'));
+  $('albumButton').addEventListener('click', () => openPicker('albumInput'));
+  ['cameraInput', 'albumInput'].forEach((id) => $(id).addEventListener('change', loadOcrImage));
+
+  function loadOcrImage(event) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return showToast('请选择图片文件');
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(image.src); sourceImage = image; rotation = 0;
+      dialog.hidden = false; document.body.style.overflow = 'hidden'; setOcrView('editor'); drawEditor();
+    };
+    image.onerror = () => showToast('图片读取失败，请重新选择');
+    image.src = URL.createObjectURL(file);
+  }
+
+  function drawEditor() {
+    const swapped = Math.abs(rotation % 180) === 90;
+    const sourceWidth = swapped ? sourceImage.height : sourceImage.width;
+    const sourceHeight = swapped ? sourceImage.width : sourceImage.height;
+    const scale = Math.min(1200 / sourceWidth, 900 / sourceHeight, 1);
+    canvas.width = Math.round(sourceWidth * scale); canvas.height = Math.round(sourceHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(rotation * Math.PI / 180);
+    ctx.drawImage(sourceImage, -sourceImage.width * scale / 2, -sourceImage.height * scale / 2, sourceImage.width * scale, sourceImage.height * scale);
+    requestAnimationFrame(() => {
+      cropBox.style.left = '6%'; cropBox.style.top = '6%'; cropBox.style.width = '88%'; cropBox.style.height = '88%';
+    });
+  }
+
+  $('rotateLeft').addEventListener('click', () => { rotation = (rotation - 90) % 360; drawEditor(); });
+  $('rotateRight').addEventListener('click', () => { rotation = (rotation + 90) % 360; drawEditor(); });
+  let dragState;
+  cropBox.addEventListener('pointerdown', (event) => {
+    event.preventDefault(); cropBox.setPointerCapture(event.pointerId);
+    dragState = { x:event.clientX, y:event.clientY, left:cropBox.offsetLeft, top:cropBox.offsetTop, width:cropBox.offsetWidth, height:cropBox.offsetHeight, resize:event.target.tagName === 'I' };
+  });
+  cropBox.addEventListener('pointermove', (event) => {
+    if (!dragState) return;
+    const parent = cropBox.parentElement, dx = event.clientX - dragState.x, dy = event.clientY - dragState.y;
+    if (dragState.resize) {
+      cropBox.style.width = `${Math.max(60, Math.min(parent.clientWidth - dragState.left, dragState.width + dx))}px`;
+      cropBox.style.height = `${Math.max(60, Math.min(parent.clientHeight - dragState.top, dragState.height + dy))}px`;
+    } else {
+      cropBox.style.left = `${Math.max(0, Math.min(parent.clientWidth - dragState.width, dragState.left + dx))}px`;
+      cropBox.style.top = `${Math.max(0, Math.min(parent.clientHeight - dragState.height, dragState.top + dy))}px`;
+    }
+  });
+  cropBox.addEventListener('pointerup', () => { dragState = null; });
+
+  function croppedCanvas() {
+    const result = document.createElement('canvas');
+    const sx = cropBox.offsetLeft / cropBox.parentElement.clientWidth * canvas.width;
+    const sy = cropBox.offsetTop / cropBox.parentElement.clientHeight * canvas.height;
+    const sw = cropBox.offsetWidth / cropBox.parentElement.clientWidth * canvas.width;
+    const sh = cropBox.offsetHeight / cropBox.parentElement.clientHeight * canvas.height;
+    result.width = Math.round(sw); result.height = Math.round(sh);
+    result.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, result.width, result.height);
+    return result;
+  }
+
+  function extractValue(text, labels) {
+    const pattern = new RegExp(`(?:${labels.join('|')})[：:\\s]*([^\\n]{1,80})`, 'i');
+    return (text.match(pattern) || [,''])[1].trim();
+  }
+  function parseOcrText(text) {
+    const plate = text.match(/[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-ZＡ-Ｚ][·•\s-]?[A-Z0-9Ａ-Ｚ０-９]{5,6}/i);
+    return {
+      plateNumber: plate ? plate[0].replace(/[•\s-]/g, '·').replace('··','·') : extractValue(text, ['车牌号','车牌']),
+      carModel: extractValue(text, ['车辆型号','车型','品牌型号']), orderNumber: extractValue(text, ['工单号','维修单号','委托书号']),
+      repairItems: extractValue(text, ['维修项目','维修内容','作业项目']), partsReplacement: extractValue(text, ['配件更换','更换配件','配件项目']), notes: extractValue(text, ['备注','客户要求'])
+    };
+  }
+
+  $('startOcr').addEventListener('click', async () => {
+    if (!window.Tesseract) return showToast('识别组件加载失败，请检查网络后重试');
+    setOcrView('progress');
+    try {
+      const worker = await Tesseract.createWorker('chi_sim+eng', 1, { logger(message) {
+        const progress = Math.round((message.progress || 0) * 100);
+        $('progressBar').style.width = `${progress}%`;
+        $('progressLabel').textContent = message.status === 'recognizing text' ? `正在识别文字 ${progress}%` : '正在加载中文识别组件…';
+      }});
+      const result = await worker.recognize(croppedCanvas()); await worker.terminate();
+      ocrValues = parseOcrText(result.data.text); $('rawOcrText').textContent = result.data.text || '未识别到文字';
+      $('recognizedFields').innerHTML = Object.entries(ocrFieldLabels).map(([id, label]) => `<label>${label}<textarea data-ocr-field="${id}" rows="2">${escapeHtml(ocrValues[id])}</textarea></label>`).join('');
+      setOcrView('result');
+    } catch (error) { console.error(error); setOcrView('editor'); showToast('识别失败，请检查网络或重新裁剪'); }
+  });
+  $('retryOcr').addEventListener('click', () => setOcrView('editor'));
+  $('applyOcr').addEventListener('click', () => {
+    document.querySelectorAll('[data-ocr-field]').forEach((input) => { if (input.value.trim()) $(input.dataset.ocrField).value = input.value.trim(); });
+    closeDialog(); showToast('识别内容已填写，请核对后保存'); form.scrollIntoView({ behavior:'smooth', block:'start' });
+  });
+  function closeDialog() { dialog.hidden = true; document.body.style.overflow = ''; }
+  dialog.querySelectorAll('[data-close-dialog]').forEach((button) => button.addEventListener('click', closeDialog));
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !dialog.hidden) closeDialog(); });
   render();
 })();
