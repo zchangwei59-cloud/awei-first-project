@@ -9,6 +9,8 @@
   let rotation = 0;
   let ocrValues = {};
   let activeOcrWorker = null;
+  let activeDetailId = null;
+  const WORKFLOW_STATUSES = ['待拆检', '待定损', '待配件', '维修中', '待喷漆', '待装车', '待交车', '已完成'];
   const OCR_TIMEOUT_MS = 90000;
   const OCR_ASSET_CACHE = 'awei-ocr-assets-v1';
   const OCR_ASSETS = {
@@ -52,6 +54,7 @@
   function statusClass(status) {
     if (status === '已完成') return 'done';
     if (status === '维修中') return 'repairing';
+    if (status === '待配件') return 'waiting-parts';
     return '';
   }
 
@@ -74,11 +77,11 @@
     $('recordsList').innerHTML = filtered.map((item) => {
       const cls = statusClass(item.status);
       const date = new Date(item.updatedAt).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
-      return `<article class="record-card ${cls === 'done' ? 'done' : ''}">
+      return `<article class="record-card ${cls === 'done' ? 'done' : ''}" data-record-id="${item.id}">
         <div class="card-top"><div><div class="plate">${escapeHtml(item.plateNumber)}</div><div class="model">${escapeHtml(item.carModel)}</div></div><span class="status ${cls}">${escapeHtml(item.status)}</span></div>
         <div class="order">工单号：${escapeHtml(item.orderNumber)}</div>
         <dl class="details">${detail('维修项目', item.repairItems)}${detail('配件更换', item.partsReplacement)}${detail('大灯外修', item.headlightRepair)}${detail('铝合金外修', item.alloyRepair)}${detail('备注', item.notes)}</dl>
-        <div class="card-footer"><span class="updated">更新于 ${date}</span><div class="card-actions"><button class="edit-btn" data-action="edit" data-id="${item.id}">编辑</button><button class="delete-btn" data-action="delete" data-id="${item.id}">删除</button></div></div>
+        <div class="card-footer"><span class="updated">更新于 ${date}</span><div class="card-actions"><button class="detail-btn" data-action="detail" data-id="${item.id}">查看详情</button><button class="edit-btn" data-action="edit" data-id="${item.id}">编辑</button><button class="delete-btn" data-action="delete" data-id="${item.id}">删除</button></div></div>
       </article>`;
     }).join('');
   }
@@ -111,18 +114,72 @@
     if (!button) return;
     const item = records.find((record) => record.id === button.dataset.id);
     if (!item) return;
+    if (button.dataset.action === 'detail') {
+      openDetail(item);
+      return;
+    }
     if (button.dataset.action === 'delete') {
       if (!confirm(`确定删除 ${item.plateNumber} 的维修记录吗？`)) return;
       records = records.filter((record) => record.id !== item.id);
       saveRecords(); render(); showToast('记录已删除');
       return;
     }
+    editRecord(item);
+  });
+
+  function editRecord(item) {
     $('recordId').value = item.id;
-    fieldIds.forEach((id) => { $(id).value = item[id] || ''; });
+    fieldIds.forEach((id) => {
+      if (id === 'status' && !WORKFLOW_STATUSES.includes(item[id])) {
+        const legacyOption = document.createElement('option');
+        legacyOption.value = item[id];
+        legacyOption.textContent = `${item[id]}（旧状态）`;
+        $('status').appendChild(legacyOption);
+      }
+      $(id).value = item[id] || '';
+    });
     $('formTitle').textContent = '编辑维修记录';
     $('submitText').textContent = '更新维修记录';
     $('cancelEdit').hidden = false;
     form.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  function openDetail(item) {
+    activeDetailId = item.id;
+    const currentIndex = WORKFLOW_STATUSES.indexOf(item.status);
+    const updated = new Date(item.updatedAt).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    $('detailTitle').textContent = `${item.plateNumber} · ${item.carModel}`;
+    $('detailContent').innerHTML = `
+      <div class="detail-hero"><span>工单号</span><strong>${escapeHtml(item.orderNumber)}</strong><span class="status ${statusClass(item.status)}">${escapeHtml(item.status)}</span></div>
+      <div class="workflow" aria-label="维修进度">${WORKFLOW_STATUSES.map((status, index) => {
+        const state = currentIndex < 0 ? '' : index < currentIndex ? 'complete' : index === currentIndex ? 'current' : '';
+        return `<div class="workflow-step ${state}"><i>${index < currentIndex ? '✓' : index + 1}</i><span>${status}</span></div>`;
+      }).join('')}</div>
+      <dl class="detail-sheet">
+        ${detail('维修项目', item.repairItems || '未填写')}
+        ${detail('配件更换', item.partsReplacement || '未填写')}
+        ${detail('大灯外修', item.headlightRepair || '无')}
+        ${detail('铝合金外修', item.alloyRepair || '无')}
+        ${detail('备注', item.notes || '无')}
+        ${detail('最后更新', updated)}
+      </dl>`;
+    $('detailDialog').hidden = false;
+    document.body.classList.add('dialog-open');
+  }
+
+  function closeDetail() {
+    $('detailDialog').hidden = true;
+    document.body.classList.remove('dialog-open');
+    activeDetailId = null;
+  }
+
+  document.querySelectorAll('[data-close-detail]').forEach((element) => element.addEventListener('click', closeDetail));
+  $('detailClose').addEventListener('click', closeDetail);
+  $('detailEdit').addEventListener('click', () => {
+    const item = records.find((record) => record.id === activeDetailId);
+    if (!item) return;
+    closeDetail();
+    editRecord(item);
   });
 
   $('cancelEdit').addEventListener('click', resetForm);
