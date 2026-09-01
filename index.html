@@ -129,6 +129,12 @@
         <div class="loader" aria-hidden="true"></div><strong id="progressLabel">正在准备中文识别…</strong>
         <div class="progress-track"><span id="progressBar"></span></div><small>首次使用需加载中文识别数据，请保持网络连接；图片始终仅在本机处理。</small>
       </div>
+      <div id="ocrError" class="ocr-error" hidden role="alert">
+        <div class="error-icon" aria-hidden="true">!</div>
+        <strong>中文识别组件加载失败</strong>
+        <p id="ocrErrorMessage">请检查网络后重试。</p>
+        <button id="retryOcrError" class="primary-button compact" type="button">重新加载并识别</button>
+      </div>
       <div id="ocrResult" hidden>
         <p class="result-tip">请核对识别结果，确认后将自动填写到登记表。已有内容不会被空白结果覆盖。</p>
         <div id="recognizedFields" class="recognized-fields"></div>
@@ -139,7 +145,7 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

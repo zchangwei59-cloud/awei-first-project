@@ -8,6 +8,21 @@
   let sourceImage = null;
   let rotation = 0;
   let ocrValues = {};
+  let activeOcrWorker = null;
+  const OCR_TIMEOUT_MS = 90000;
+  const OCR_ASSET_CACHE = 'awei-ocr-assets-v1';
+  const OCR_ASSETS = {
+    core: Array.from({ length: 6 }, (_, index) => `./vendor/tesseract/core/tesseract-core-lstm.wasm.js.part${String(index).padStart(2, '0')}`),
+    chi_sim: Array.from({ length: 3 }, (_, index) => `./vendor/tesseract/lang/chi_sim.traineddata.gz.part${String(index).padStart(2, '0')}`),
+    eng: Array.from({ length: 5 }, (_, index) => `./vendor/tesseract/lang/eng.traineddata.gz.part${String(index).padStart(2, '0')}`)
+  };
+  let ocrAssetsPromise = null;
+  const TESSERACT_OPTIONS = {
+    workerPath: './vendor/tesseract/worker.min.js',
+    cachePath: 'awei-ocr-v1',
+    cacheMethod: 'write',
+    gzip: true
+  };
 
   function loadRecords() {
     try {
@@ -122,6 +137,77 @@
     $('imageEditor').hidden = view !== 'editor';
     $('ocrProgress').hidden = view !== 'progress';
     $('ocrResult').hidden = view !== 'result';
+    $('ocrError').hidden = view !== 'error';
+  }
+
+  function updateOcrProgress(message) {
+    const progress = Math.max(0, Math.min(100, Math.round((message.progress || 0) * 100)));
+    const labels = {
+      'loading tesseract core': '正在加载本地识别引擎',
+      'initializing tesseract': '正在初始化识别引擎',
+      'loading language traineddata': '正在下载中英文识别数据',
+      'initializing api': '正在准备中英文识别',
+      'recognizing text': '正在识别文字'
+    };
+    $('progressBar').style.width = `${progress}%`;
+    $('progressLabel').textContent = `${labels[message.status] || '正在准备识别'} ${progress}%`;
+  }
+
+  async function fetchCachedAsset(path) {
+    const cache = 'caches' in window ? await caches.open(OCR_ASSET_CACHE) : null;
+    const cached = cache && await cache.match(path);
+    if (cached) return cached.arrayBuffer();
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`资源下载失败 (${response.status})：${path}`);
+    if (cache) await cache.put(path, response.clone());
+    return response.arrayBuffer();
+  }
+
+  function joinBuffers(buffers) {
+    const result = new Uint8Array(buffers.reduce((total, buffer) => total + buffer.byteLength, 0));
+    let offset = 0;
+    buffers.forEach((buffer) => { result.set(new Uint8Array(buffer), offset); offset += buffer.byteLength; });
+    return result;
+  }
+
+  async function loadOcrAssets() {
+    if (ocrAssetsPromise) return ocrAssetsPromise;
+    ocrAssetsPromise = (async () => {
+      const entries = Object.entries(OCR_ASSETS);
+      const totalParts = entries.reduce((total, [, paths]) => total + paths.length, 0);
+      let loadedParts = 0;
+      const loaded = {};
+      for (const [name, paths] of entries) {
+        const buffers = [];
+        for (const path of paths) {
+          buffers.push(await fetchCachedAsset(path));
+          loadedParts += 1;
+          const progress = Math.round(loadedParts / totalParts * 100);
+          $('progressBar').style.width = `${progress}%`;
+          $('progressLabel').textContent = `正在下载本地识别文件 ${progress}%`;
+        }
+        loaded[name] = joinBuffers(buffers);
+      }
+      loaded.coreUrl = URL.createObjectURL(new Blob([loaded.core], { type: 'application/javascript' }));
+      return loaded;
+    })().catch((error) => { ocrAssetsPromise = null; throw error; });
+    return ocrAssetsPromise;
+  }
+
+  function timeoutAfter(milliseconds) {
+    return new Promise((_, reject) => setTimeout(() => {
+      const error = new Error('OCR_TIMEOUT');
+      error.code = 'OCR_TIMEOUT';
+      reject(error);
+    }, milliseconds));
+  }
+
+  function showOcrError(error) {
+    const timedOut = error && (error.code === 'OCR_TIMEOUT' || error.message === 'OCR_TIMEOUT');
+    $('ocrErrorMessage').textContent = timedOut
+      ? '加载或识别超过 90 秒，可能是网络较慢。请检查网络后点击重试。'
+      : '无法加载本地识别文件。请检查网络连接、刷新页面，或点击下方按钮重试。';
+    setOcrView('error');
   }
 
   function openPicker(id) { $(id).click(); }
@@ -201,21 +287,36 @@
     };
   }
 
-  $('startOcr').addEventListener('click', async () => {
-    if (!window.Tesseract) return showToast('识别组件加载失败，请检查网络后重试');
+  async function runOcr() {
+    if (!window.Tesseract) {
+      showOcrError(new Error('Tesseract 主程序未加载'));
+      return;
+    }
     setOcrView('progress');
+    $('progressBar').style.width = '0%';
+    $('progressLabel').textContent = '正在加载本地识别组件 0%';
     try {
-      const worker = await Tesseract.createWorker('chi_sim+eng', 1, { logger(message) {
-        const progress = Math.round((message.progress || 0) * 100);
-        $('progressBar').style.width = `${progress}%`;
-        $('progressLabel').textContent = message.status === 'recognizing text' ? `正在识别文字 ${progress}%` : '正在加载中文识别组件…';
-      }});
-      const result = await worker.recognize(croppedCanvas()); await worker.terminate();
+      const job = (async () => {
+        const assets = await loadOcrAssets();
+        activeOcrWorker = await Tesseract.createWorker([
+          { code: 'chi_sim', data: assets.chi_sim },
+          { code: 'eng', data: assets.eng }
+        ], 1, { ...TESSERACT_OPTIONS, corePath: assets.coreUrl, logger: updateOcrProgress });
+        return activeOcrWorker.recognize(croppedCanvas());
+      })();
+      const result = await Promise.race([job, timeoutAfter(OCR_TIMEOUT_MS)]);
+      await activeOcrWorker.terminate(); activeOcrWorker = null;
       ocrValues = parseOcrText(result.data.text); $('rawOcrText').textContent = result.data.text || '未识别到文字';
       $('recognizedFields').innerHTML = Object.entries(ocrFieldLabels).map(([id, label]) => `<label>${label}<textarea data-ocr-field="${id}" rows="2">${escapeHtml(ocrValues[id])}</textarea></label>`).join('');
       setOcrView('result');
-    } catch (error) { console.error(error); setOcrView('editor'); showToast('识别失败，请检查网络或重新裁剪'); }
-  });
+    } catch (error) {
+      console.error(error);
+      if (activeOcrWorker) { await activeOcrWorker.terminate().catch(() => {}); activeOcrWorker = null; }
+      showOcrError(error);
+    }
+  }
+  $('startOcr').addEventListener('click', runOcr);
+  $('retryOcrError').addEventListener('click', runOcr);
   $('retryOcr').addEventListener('click', () => setOcrView('editor'));
   $('applyOcr').addEventListener('click', () => {
     document.querySelectorAll('[data-ocr-field]').forEach((input) => { if (input.value.trim()) $(input.dataset.ocrField).value = input.value.trim(); });
